@@ -1,0 +1,737 @@
+---
+---
+---
+
+---
+title: "**Salesforce Opportunity Analysis**"
+author: "Aman Mulchandani"
+output:
+html_document:
+css: styles.css
+pdf_document:
+latex_engine: xelatex
+---
+
+```{=html}
+<style>
+.title {
+  font-size: 44px !important;
+  font-weight: 700 !important;
+  font-style: normal !important;
+  margin-bottom: 8px;
+}
+</style>
+
+
+<style>
+body {
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+h2 {
+  font-size: 30px;
+  font-weight: 700;
+  margin-top: 30px;
+  margin-bottom: 10px;
+  text-align: left;
+}
+
+h3 {
+  font-size: 19px;
+  font-weight: 700;
+  margin-top: 18px;
+  margin-bottom: 8px;
+  text-align: left;
+}
+
+p, li {
+  font-size: 16px;
+  line-height: 1.55;
+  margin-bottom: 10px;
+}
+
+ul {
+  margin-top: 6px;
+  margin-bottom: 14px;
+}
+
+li {
+  margin-bottom: 6px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  margin-bottom: 18px;
+  font-size: 15px;
+}
+
+th, td {
+  padding: 6px 8px;
+  text-align: left;
+}
+
+thead th {
+  border-bottom: 2px solid #d9d9d9;
+}
+
+tbody tr {
+  border-bottom: 1px solid #e6e6e6;
+}
+
+h2 + p,
+h2 + ul,
+h2 + table,
+h3 + p,
+h3 + ul,
+h3 + table {
+  margin-top: 6px;
+}
+
+.figure,
+.plot,
+img {
+  margin-top: 10px;
+  margin-bottom: 14px;
+}
+
+pre, code {
+  font-size: 13px;
+}
+
+.title {
+  margin-bottom: 8px;
+}
+
+.author, .date {
+  margin-bottom: 4px;
+}
+
+.main-container {
+  max-width: 1000px;
+}
+</style>
+```
+
+## Executive Summary
+
+This analysis reviews 1,272 Salesforce opportunities created on or after January 1, 2024, representing \$397.2M in total value. The results show a large active pipeline, strong closed-won performance, improving recent sales activity, and meaningful differences in advisor and deal-level outcomes.
+
+Open pipeline value is concentrated heavily in the Identified and Discussed stages, indicating that much of the current pipeline remains early stage and less certain to convert in the near term. At the same time, closed outcomes are heavily skewed toward wins: Closed Won opportunities account for \$120.7M in value versus \$11.6M for Closed Lost, producing a 91.8% overall win rate.
+
+Performance also improved over time. Opportunity creation and closed-won revenue both increased noticeably in 2025 relative to most months in 2024. In addition, won deals closed far more quickly than lost deals, with median sales cycles of 17 versus 103 days, suggesting that longer-aging opportunities may carry higher conversion risk.
+
+Advisor-level comparisons show that performance varies by total value, realized revenue, and conversion efficiency, so no single metric fully captures advisor contribution. Overall, the analysis suggests strong realized sales results alongside an opportunity to improve progression through the early stages of the funnel.
+
+## Data Scope and Assumptions
+
+The dataset contains Salesforce opportunity records with fields including stage, amount, created date, close date, opportunity type, record type, and owning advisor. Each row is treated as a single opportunity.
+
+The analysis is limited to opportunities created on or after January 1, 2024. Identified, Discussed, and In Process are treated as open pipeline stages, while Closed Won and Closed Lost are treated as closed outcomes.
+
+Created Date is used for pipeline creation trends, and Close Date is used for closed performance trends. The analysis focuses on descriptive measures such as opportunity counts, pipeline value, closed-won revenue, win rate, sales cycle timing, and advisor comparisons. Findings are limited to patterns visible in the export and do not capture broader sales context.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+```
+
+```{r libraries}
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(scales)
+library(knitr)
+library(tidyr)
+library(stringr)
+library(kableExtra)
+
+stage_colors <- c(
+  "Identified" = "#4E79A7",
+  "Discussed" = "#F28E2B",
+  "In Process" = "#59A14F",
+  "Closed Won" = "#2E8B57",
+  "Closed Lost" = "#E15759"
+)
+
+theme_report <- function() {
+  theme_minimal(base_size = 13) +
+    theme(
+      plot.title = element_text(face = "bold", size = 16, hjust = 0),
+      plot.subtitle = element_text(size = 11, color = "gray35"),
+      axis.title = element_text(face = "bold"),
+      axis.text = element_text(color = "gray20"),
+      panel.grid.minor = element_blank(),
+      legend.position = "top",
+      legend.title = element_blank()
+    )
+}
+
+
+```
+
+```{r data_set}
+df <- read_excel("Project_Dataset.xlsx")
+```
+
+```{r data-cleaning}
+df_clean <- df %>%
+  mutate(
+    `Created Date` = as.Date(`Created Date`),
+    `Close Date` = as.Date(`Close Date`),
+    `Last Stage Change Date` = mdy_hm(`Last Stage Change Date`),
+    `Last Modified Date` = mdy_hm(`Last Modified Date`),
+    Amount = as.numeric(Amount),
+    Stage = as.character(Stage),
+    Type = as.character(Type),
+    `Opportunity Record Type` = as.character(`Opportunity Record Type`),
+    `Owning Advisor` = as.character(`Owning Advisor`)
+  ) %>%
+  filter(`Created Date` >= as.Date("2024-01-01")) %>%
+  mutate(
+    status_group = case_when(
+      Stage %in% c("Identified", "Discussed", "In Process") ~ "Open",
+      Stage %in% c("Closed Won", "Closed Lost") ~ "Closed",
+      TRUE ~ "Other"
+    ),
+    outcome = case_when(
+      Stage == "Closed Won" ~ "Won",
+      Stage == "Closed Lost" ~ "Lost",
+      TRUE ~ "Open"
+    ),
+    created_month = floor_date(`Created Date`, unit = "month"),
+    close_month = floor_date(`Close Date`, unit = "month")
+  )
+
+```
+
+## Key Highlights
+
+-   Analyzed **1,272 opportunities** totaling **\$397.2M** in value
+-   Identified **\$264.9M** in open pipeline and **\$120.7M** in closed won value
+-   Found a **91.8% win rate** across closed opportunities
+-   Observed that won deals closed much faster than lost deals, with median sales cycles of **17 vs. 103 days**
+
+## Pipeline Analysis
+
+```{r pipeline-by-stage}
+pipeline_stage <- df_clean %>%
+  filter(status_group == "Open") %>%
+  group_by(Stage) %>%
+  summarise(
+    Opportunities = n(),
+    `Pipeline Value` = sum(Amount, na.rm = TRUE),
+    `Average Amount` = mean(Amount, na.rm = TRUE),
+    `Median Amount` = median(Amount, na.rm = TRUE)
+  ) %>%
+  arrange(desc(`Pipeline Value`)) %>%
+  mutate(
+    `Pipeline Value` = dollar(`Pipeline Value`),
+    `Average Amount` = dollar(`Average Amount`),
+    `Median Amount` = dollar(`Median Amount`)
+  )
+
+kable(pipeline_stage, caption = "Open Pipeline by Stage")
+
+
+```
+
+```{r pipeline-value-chart}
+
+pipeline_plot_data <- df_clean %>%
+  filter(status_group == "Open") %>%
+  group_by(Stage) %>%
+  summarise(Pipeline_Value = sum(Amount, na.rm = TRUE)) %>%
+  arrange(Pipeline_Value)
+
+ggplot(pipeline_plot_data,
+       aes(x = reorder(Stage, Pipeline_Value), y = Pipeline_Value, fill = Stage)) +
+  geom_col(width = 0.7) +
+  geom_text(aes(label = dollar(Pipeline_Value, accuracy = 0.1)),
+            hjust = -0.1, size = 4) +
+  coord_flip() +
+  scale_fill_manual(values = stage_colors) +
+  scale_y_continuous(labels = dollar_format(),
+                     expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title = "Open Pipeline Value by Stage",
+    subtitle = "Pipeline value is concentrated in early-stage deals",
+    x = NULL,
+    y = "Pipeline Value"
+  ) +
+  
+  theme_report() + theme(legend.position = "none")
+```
+
+::: {style="break-before: page; page-break-before: always;"}
+:::
+
+#### Current Pipeline Mix
+
+Open pipeline value is concentrated heavily in the Identified and Discussed stages. Together, these two stages account for nearly all active pipeline value, with Identified at \$144.7M and Discussed at \$105.3M, compared with just \$14.9M in In Process. This suggests that most of the current pipeline remains early in the funnel and is therefore less certain to convert into near-term revenue.
+
+From an execution standpoint, this stage mix points to a need for stronger progression into later funnel stages. If a large share of opportunity value remains in early-stage deals for too long, reported pipeline may overstate near-term revenue potential. Prioritizing movement of high-value deals from Identified and Discussed into In Process would likely improve pipeline quality and forecasting confidence.
+
+#### Pipeline Creation Trends
+
+Beyond the current pipeline mix, it is also useful to examine how opportunity creation has changed over time.
+
+```{r created-trend}
+created_trend_display <- df_clean %>%
+  group_by(created_month) %>%
+  summarise(
+    `Opportunities Created` = n(),
+    `Amount Created` = sum(Amount, na.rm = TRUE)
+  ) %>%
+  arrange(created_month) %>%
+  mutate(
+    Month = format(created_month, "%b %Y"),
+    `Amount Created` = dollar(`Amount Created`)
+  ) %>%
+  select(Month, `Opportunities Created`, `Amount Created`)
+
+created_trend_display %>%
+  knitr::kable(caption = "Opportunity Creation Trend by Month") %>%
+  kableExtra::kable_styling(
+    full_width = TRUE,
+    font_size = 11
+  ) %>%
+  kableExtra::row_spec(0:nrow(created_trend_display), extra_css = "padding-top: 2px; padding-bottom: 2px;")
+```
+
+```{r created-count-chart, fig.height=4.3, out.width="100%"}
+created_count_plot <- df_clean %>%
+  group_by(created_month) %>%
+  summarise(Opportunities_Created = n())
+
+ggplot(created_count_plot, aes(x = created_month, y = Opportunities_Created)) +
+  geom_line(color = "#4E79A7", linewidth = 1.2) +
+  geom_point(color = "#4E79A7", size = 2.8) +
+  geom_smooth(method = "lm", se = FALSE, linetype = "dashed", color = "gray45") +
+  scale_x_date(date_labels = "%b %Y", date_breaks = "2 months") +
+  scale_y_continuous(labels = comma_format()) +
+  labs(
+    title = "Opportunities Created by Month",
+    subtitle = "Opportunity creation increased sharply in 2025",
+    x = NULL,
+    y = "Number of Opportunities"
+  ) +
+  theme_report() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r created-amount-chart, fig.height=4.3, out.width="100%"}
+created_value_plot <- df_clean %>%
+  group_by(created_month) %>%
+  summarise(Amount_Created = sum(Amount, na.rm = TRUE))
+
+ggplot(created_value_plot, aes(x = created_month, y = Amount_Created)) +
+  geom_line(color = "#F28E2B", linewidth = 1.2) +
+  geom_point(color = "#F28E2B", size = 2.8) +
+  scale_y_continuous(labels = dollar_format()) +
+  scale_x_date(date_labels = "%b %Y", date_breaks = "2 months") +
+  labs(
+    title = "Opportunity Value Created by Month",
+    subtitle = "Pipeline value creation strengthened in 2025",
+    x = NULL,
+    y = "Amount Created"
+  ) +
+  theme_report() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Pipeline creation strengthened materially over time, with both opportunity volume and created value rising in 2025 relative to most months in 2024. Opportunity counts were generally modest during 2024, then increased sharply beginning in January 2025 and stayed elevated through May 2025. The highest monthly count in the filtered data occurred in May 2025, with 183 opportunities created.
+
+Created opportunity value shows the same overall upward pattern, although with greater month-to-month volatility. August 2024 stands out as an early spike in value despite a moderate number of created deals, which suggests the presence of a few larger opportunities. In 2025, created value remained consistently strong and peaked at \$58.2M in March 2025. Taken together, these patterns suggest that recent pipeline generation improved not only in volume, but also in dollar quality.
+
+The final month in the series appears to reflect an incomplete reporting period and should be interpreted cautiously.
+
+## Closed-Won Performance
+
+```{r closed-summary}
+closed_summary <- df_clean %>%
+  filter(status_group == "Closed") %>%
+  group_by(Stage) %>%
+  summarise(
+    Opportunities = n(),
+    `Total Value` = sum(Amount, na.rm = TRUE),
+    `Average Amount` = mean(Amount, na.rm = TRUE),
+    `Median Amount` = median(Amount, na.rm = TRUE)
+  ) %>%
+  arrange(desc(`Total Value`)) %>%
+  mutate(
+    `Total Value` = dollar(`Total Value`),
+    `Average Amount` = dollar(`Average Amount`),
+    `Median Amount` = dollar(`Median Amount`)
+  )
+
+kable(closed_summary, caption = "Closed Opportunity Summary")
+
+```
+
+```{r closed-value-chart, fig.height=4.0}
+closed_value_data <- df_clean %>%
+  filter(status_group == "Closed") %>%
+  group_by(Stage) %>%
+  summarise(Total_Value = sum(Amount, na.rm = TRUE)) %>%
+  arrange(Total_Value)
+
+ggplot(closed_value_data,
+       aes(x = reorder(Stage, Total_Value), y = Total_Value, fill = Stage)) +
+  geom_col(width = 0.65) +
+  geom_text(aes(label = dollar(Total_Value, accuracy = 1)),
+            vjust = -0.4, size = 4) +
+  scale_fill_manual(values = stage_colors) +
+  scale_y_continuous(labels = dollar_format(),
+                     expand = expansion(mult = c(0, 0.15))) +
+  labs(
+    title = "Closed Opportunity Value by Outcome",
+    subtitle = "Closed Won accounts for most realized revenue",
+    x = NULL,
+    y = "Total Value"
+  ) +
+  theme_report() + theme(legend.position = "none")
+```
+
+#### Outcome Mix
+
+Closed outcomes are overwhelmingly skewed toward wins. Closed Won opportunities account for \$120.7M in value compared with \$11.6M for Closed Lost, which corresponds to an overall win rate of 91.8%. This indicates that realized sales performance in the dataset is dominated by successful conversions rather than a more balanced split between wins and losses.
+
+Although Closed Lost opportunities are far fewer, their average deal size is slightly higher than Closed Won opportunities, while the median deal size is also higher. This suggests that the lost group may include a smaller number of relatively larger deals, and that the strong overall win rate is driven more by the volume of wins than by materially larger average won deal sizes.
+
+#### Closed-Won Revenue Trends
+
+To understand whether realized performance improved over time, it is useful to examine monthly closed deal activity and closed-won revenue.
+
+```{r closed-monthly}
+closed_monthly <- df_clean %>%
+  filter(status_group == "Closed") %>%
+  group_by(close_month) %>%
+  summarise(
+    `Closed Deals` = n(),
+    `Won Deals` = sum(Stage == "Closed Won", na.rm = TRUE),
+    `Won Revenue` = sum(Amount[Stage == "Closed Won"], na.rm = TRUE)
+  ) %>%
+  arrange(close_month)
+
+closed_monthly_display <- closed_monthly %>%
+  mutate(
+    Month = format(close_month, "%b %Y"),
+    `Won Revenue` = dollar(`Won Revenue`)
+  ) %>%
+  select(Month, `Closed Deals`, `Won Deals`, `Won Revenue`)
+
+closed_monthly_display %>%
+  knitr::kable(caption = "Monthly Closed Trend") %>%
+  kableExtra::kable_styling(
+    full_width = TRUE,
+    font_size = 11
+  ) %>%
+  kableExtra::row_spec(
+    0:nrow(closed_monthly_display),
+    extra_css = "padding-top: 1px; padding-bottom: 1px;"
+  )
+```
+
+```{r closed-monthly-chart, fig.height=4.3, out.width="100%"}
+won_revenue_plot <- df_clean %>%
+  filter(status_group == "Closed") %>%
+  group_by(close_month) %>%
+  summarise(Won_Revenue = sum(Amount[Stage == "Closed Won"], na.rm = TRUE)) %>%
+  arrange(close_month)
+
+peak_month <- won_revenue_plot %>%
+  slice_max(Won_Revenue, n = 1)
+
+ggplot(won_revenue_plot, aes(x = close_month, y = Won_Revenue)) +
+  geom_line(color = "#2E8B57", linewidth = 1.2) +
+  geom_point(color = "#2E8B57", size = 2.8) +
+  geom_smooth(method = "loess", se = FALSE, linetype = "dashed", color = "gray45", linewidth = 0.8) +
+  geom_point(data = peak_month, color = "#E15759", size = 3.5) +
+  geom_text(
+    data = peak_month,
+    aes(label = paste0(format(close_month, "%b %Y"), "\n", dollar(Won_Revenue, accuracy = 1))),
+    vjust = -0.8,
+    size = 3.5,
+    color = "#E15759"
+  ) +
+  scale_y_continuous(labels = dollar_format()) +
+  scale_x_date(date_labels = "%b %Y", date_breaks = "2 months") +
+  labs(
+    title = "Closed Won Revenue by Month",
+    subtitle = "Closed-won revenue accelerated in 2025",
+    x = NULL,
+    y = "Won Revenue"
+  ) +
+  theme_report() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+```{r, fig.height=4.3, out.width="100%"}
+monthly_win_rate <- df_clean %>%
+  filter(status_group == "Closed") %>%
+  group_by(close_month) %>%
+  summarise(
+    closed_deals = n(),
+    won_deals = sum(Stage == "Closed Won", na.rm = TRUE)
+  ) %>%
+  mutate(win_rate = won_deals / closed_deals)
+
+ggplot(monthly_win_rate, aes(x = close_month, y = win_rate)) +
+  geom_line(color = "#2E8B57", linewidth = 1.2) +
+  geom_point(color = "#2E8B57", size = 2.8) +
+  scale_y_continuous(labels = percent_format(accuracy = 1), limits = c(0, 1)) +
+  scale_x_date(date_labels = "%b %Y", date_breaks = "2 months") +
+  labs(
+    title = "Monthly Win Rate",
+    subtitle = "Win rates remained strong across most months",
+    x = NULL,
+    y = "Win Rate"
+  ) +
+  theme_report() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+Closed-won revenue strengthened materially in 2025 relative to most months in 2024. Revenue remained below \$5M in most early and mid-2024 months, then rose sharply in late 2024 and early 2025. The strongest month in the series was February 2025, with approximately \$27.7M in closed-won revenue, followed by several other months above \$9M. This pattern suggests that realized sales performance improved meaningfully in the more recent period.
+
+Monthly win rates also remained consistently high across most of the time series, reinforcing the broader result that closed outcomes were dominated by wins. While there was some month-to-month volatility, the win rate stayed strong overall and recovered quickly after weaker months. Taken together, the revenue and win-rate trends suggest not only more activity in 2025, but also continued efficiency in converting closed opportunities into wins.
+
+## Sales Cycle Insights
+
+```{r days-to-close}
+df_clean <- df_clean %>%
+  mutate(days_to_close = as.numeric(`Close Date` - `Created Date`))
+
+```
+
+```{r cycle-summary}
+cycle_summary <- df_clean %>%
+  filter(status_group == "Closed") %>%
+  mutate(Outcome = ifelse(Stage == "Closed Won", "Won", "Lost")) %>%
+  group_by(Outcome) %>%
+  summarise(
+    Opportunities = n(),
+    `Average Days to Close` = round(mean(days_to_close, na.rm = TRUE), 1),
+    `Median Days to Close` = round(median(days_to_close, na.rm = TRUE), 1),
+    `Min Days to Close` = min(days_to_close, na.rm = TRUE),
+    `Max Days to Close` = max(days_to_close, na.rm = TRUE)
+  )
+
+kable(cycle_summary, caption = "Sales Cycle Summary by Outcome")
+```
+
+#### Cycle Speed and Conversion
+
+Sales cycle timing is one of the clearest signals in the dataset. Closed Won opportunities had a median time to close of 17 days, compared with 103 days for Closed Lost, while average days to close were 38.1 and 119.5, respectively. This large gap suggests that faster-moving opportunities were substantially more likely to convert successfully.
+
+The difference is important from a business perspective because it separates not just winners from losers, but also likely healthy opportunities from aging ones. Deals that remain open longer may require closer review, more active follow-up, or reassessment of near-term conversion likelihood.
+
+```{r, fig.height=4.1, out.width="100%"}
+median_close_plot <- df_clean %>%
+  filter(status_group == "Closed") %>%
+  group_by(Stage) %>%
+  summarise(Median_Days_to_Close = median(days_to_close, na.rm = TRUE)) %>%
+  arrange(Median_Days_to_Close)
+
+ggplot(median_close_plot,
+       aes(x = reorder(Stage, Median_Days_to_Close), y = Median_Days_to_Close, fill = Stage)) +
+  geom_col(width = 0.65) +
+  geom_text(aes(label = comma(Median_Days_to_Close)),
+            vjust = -0.4, size = 4) +
+  scale_fill_manual(values = stage_colors) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+  labs(
+    title = "Median Days to Close by Outcome",
+    subtitle = "Lost deals take much longer to close",
+    x = NULL,
+    y = "Median Days to Close"
+  ) +
+  theme_report() + theme(legend.position = "none")
+```
+
+#### Distribution of Cycle Lengths
+
+The median comparison shows the size of the gap, but the full distribution helps explain how consistent that pattern is across opportunities.
+
+```{r, fig.height=4.1, out.width="100%"}
+sales_cycle_plot <- df_clean %>%
+  filter(Stage %in% c("Closed Won", "Closed Lost")) %>%
+  mutate(Days_to_Close = as.numeric(`Close Date` - `Created Date`)) %>%
+  filter(!is.na(Days_to_Close), Days_to_Close >= 0)
+
+ggplot(sales_cycle_plot, aes(x = Stage, y = Days_to_Close, fill = Stage)) +
+  geom_violin(alpha = 0.7, trim = FALSE) +
+  geom_boxplot(width = 0.15, outlier.alpha = 0.2, fill = "white") +
+  scale_fill_manual(values = stage_colors) +
+  labs(
+    title = "Sales Cycle Length by Outcome",
+    subtitle = "Faster-moving deals are more likely to convert",
+    x = NULL,
+    y = "Days to Close"
+  ) +
+  theme_report()
+```
+
+The distribution plot reinforces the same pattern shown in the summary table and median comparison. Closed Lost opportunities are centered at much higher cycle lengths, while most Closed Won opportunities close relatively early, even though a smaller number of wins take much longer. This suggests that the relationship between cycle speed and outcome is not driven by only a few extreme observations.
+
+From a business standpoint, aging opportunities may represent elevated conversion risk. While some long-duration deals still close successfully, the overall pattern indicates that opportunities moving through the funnel quickly are much more likely to end in a win. This makes sales cycle timing a useful lens for prioritization, pipeline review, and risk monitoring.
+
+## Advisor Performance
+
+```{r advisor-summary}
+advisor_summary <- df_clean %>%
+  group_by(`Owning Advisor`) %>%
+  summarise(
+    `Total Opportunities` = n(),
+    `Total Value` = sum(Amount, na.rm = TRUE),
+    `Closed Opportunities` = sum(status_group == "Closed", na.rm = TRUE),
+    `Won Opportunities` = sum(Stage == "Closed Won", na.rm = TRUE),
+    `Won Revenue` = sum(Amount[Stage == "Closed Won"], na.rm = TRUE)
+  ) %>%
+  mutate(
+    `Win Rate` = ifelse(`Closed Opportunities` > 0,
+                        `Won Opportunities` / `Closed Opportunities`,
+                        NA)
+  ) %>%
+  arrange(desc(`Total Value`))
+
+advisor_summary_display <- advisor_summary %>%
+  mutate(
+    `Total Value` = dollar(`Total Value`),
+    `Won Revenue` = dollar(`Won Revenue`),
+    `Win Rate` = percent(`Win Rate`, accuracy = 0.1)
+  )
+
+kable(advisor_summary_display, caption = "Advisor Performance Summary")
+
+```
+
+#### Portfolio Size and Coverage
+
+Advisor portfolios vary substantially in both total value and opportunity volume. EV leads the group in total opportunity value at approximately \$124.5M, well ahead of the next advisor, while KK and JN manage the largest opportunity counts. This suggests that advisor contribution differs depending on whether performance is viewed through dollar value, deal volume, or both.
+
+Because the advisor mix is not evenly distributed, larger portfolios should not automatically be treated as stronger overall performance. Advisors managing more opportunities or more total value may still differ meaningfully in realized revenue and conversion efficiency.
+
+```{r advisor-total-value-chart, fig.height=4.1, out.width="100%"}
+advisor_total_value_plot <- advisor_summary %>%
+  arrange(`Total Value`) %>%
+  slice_tail(n = 10)
+
+ggplot(advisor_total_value_plot,
+       aes(x = reorder(`Owning Advisor`, `Total Value`), y = `Total Value`, fill = `Owning Advisor`)) +
+  geom_col(width = 0.7, show.legend = FALSE) +
+  geom_text(aes(label = dollar(`Total Value`, accuracy = 1)),
+            hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = dollar_format(),
+    expand = expansion(mult = c(0, 0.22))
+  ) +
+  labs(
+    title = "Top Advisors by Total Opportunity Value",
+    subtitle = "Advisor portfolios vary substantially in overall value",
+    x = NULL,
+    y = "Total Opportunity Value"
+  ) +
+  theme_report() 
+```
+
+#### Conversion Efficiency
+
+Portfolio size tells only part of the story. To understand how effectively advisors convert opportunities into wins, win rate should be examined alongside the number of closed opportunities.
+
+```{r advisor-win-rate-chart, fig.height=4.1, out.width="100%"}
+advisor_win_rate_plot <- advisor_summary %>%
+  filter(`Closed Opportunities` >= 20) %>%
+  arrange(`Win Rate`) 
+
+ggplot(advisor_win_rate_plot,
+       aes(x = reorder(`Owning Advisor`, `Win Rate`), y = `Win Rate`, fill = `Owning Advisor`)) +
+  geom_col(width = 0.7, show.legend = FALSE) +
+  geom_text(aes(label = percent(`Win Rate`, accuracy = 0.1)),
+            hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = percent_format(accuracy = 1),
+    limits = c(0, 1.05),
+    expand = expansion(mult = c(0, 0.05))
+  ) +
+  labs(
+    title = "Win Rate by Advisor",
+    subtitle = "Conversion performance differs across advisors",
+    x = NULL,
+    y = "Win Rate"
+  ) +
+  theme_report()
+```
+
+#### Realized Revenue
+
+Closed-won revenue provides a more direct view of realized advisor contribution because it reflects actual converted value rather than pipeline size alone.
+
+```{r, fig.height=4.1, out.width="100%"}
+advisor_won_revenue <- df_clean %>%
+  filter(Stage == "Closed Won") %>%
+  group_by(`Owning Advisor`) %>%
+  summarise(Won_Revenue = sum(Amount, na.rm = TRUE)) %>%
+  arrange(Won_Revenue) %>%
+  slice_tail(n = 10)
+
+ggplot(advisor_won_revenue,
+       aes(x = reorder(`Owning Advisor`, Won_Revenue), y = Won_Revenue, fill = `Owning Advisor`)) +
+  geom_col(width = 0.7, show.legend = FALSE) +
+  geom_text(aes(label = dollar(Won_Revenue, accuracy = 1)),
+            hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  scale_y_continuous(labels = dollar_format(),
+                     expand = expansion(mult = c(0, 0.18))) +
+  labs(
+    title = "Top Advisors by Closed Won Revenue",
+    subtitle = "Closed won revenue varies meaningfully across advisors",
+    x = NULL,
+    y = "Closed Won Revenue"
+  ) +
+  theme_report()
+  
+```
+
+The advisor charts show that performance changes depending on the metric used. EV stands out clearly in both total opportunity value and closed-won revenue, indicating a combination of portfolio scale and strong realized output. KK also ranks highly in closed-won revenue and manages one of the largest opportunity books, while advisors such as BC, JS, and JN perform strongly on conversion rate.
+
+Win rate should be interpreted carefully alongside closed-opportunity volume. JN and TP show perfect win rates, but TP’s result is based on only 5 closed opportunities, while JN’s rate is supported by a much larger sample. By contrast, BR manages substantial opportunity value but has the lowest win rate among the advisors shown, suggesting weaker conversion efficiency relative to peers.
+
+Overall, the advisor analysis reinforces that no single metric fully captures performance. Total pipeline value, won revenue, and win rate each tell a different story, so advisor evaluation is strongest when it considers scale, output, and conversion together rather than relying on a single ranking.
+
+\newpage
+
+## Key Takeaways
+
+The pipeline is large, but most open value is still concentrated in the earliest stages of the funnel. Because only a small share has progressed to In Process, current pipeline totals likely overstate near-term revenue potential. The main issue is not pipeline size, but pipeline progression.
+
+Performance improved meaningfully in 2025. Both opportunity creation and closed-won revenue were stronger than in most months of 2024, which suggests better recent pipeline generation and stronger realized sales results. At the same time, some large monthly spikes indicate that results are still influenced by a relatively small number of bigger deals.
+
+Sales cycle length is one of the clearest signals in the dataset. Won deals closed much faster than lost deals, with median days to close of 17 versus 103. This suggests that older opportunities are less likely to convert and should be monitored more closely.
+
+Advisor performance changes depending on the metric used. Some advisors lead in total opportunity value, others in closed-won revenue, and others in win rate. This means advisor performance should be evaluated across scale, output, and efficiency rather than with one ranking alone.
+
+## Recommendations
+
+-   Review high-value opportunities that have stayed too long in Identified or Discussed. This will help separate real pipeline from deals that are still open but are less likely to contribute to near-term revenue.
+
+-   Use sales cycle length as a practical risk flag. Opportunities that stay open far longer than typical won deals should be reviewed, reprioritized, or escalated, because the data suggests that long-aging deals are less likely to close successfully.
+
+-   Track performance with a small balanced set of metrics instead of relying on one number. For pipeline health, focus on stage mix and progression. For advisors, focus on total opportunity value, closed-won revenue, and win rate together.
+
+-   Keep monitoring whether the stronger 2025 trend continues. Recent results are clearly stronger, but it is still important to confirm that this improvement reflects sustained performance and not just a few large wins.
+
+## Limitations
+
+This analysis is based only on the fields available in the Salesforce export and is therefore limited to patterns visible at the opportunity level. It does not include broader context such as lead source, account history, sales activity, or reasons why specific opportunities were won or lost.
+
+The report is also descriptive rather than predictive. It identifies trends in pipeline stage, closed-won performance, sales cycle timing, and advisor results, but it does not test causality or estimate the probability that individual open opportunities will convert.
+
+Some recent monthly results should be interpreted cautiously because the final month in the series appears to reflect an incomplete reporting period. In addition, a few monthly spikes in created value and closed-won revenue suggest that results can be influenced by a relatively small number of larger deals.
+
+Advisor comparisons should also be interpreted in context. Some advisors manage much larger books of business than others, and win-rate comparisons can look stronger or weaker depending on the number of closed opportunities behind them. For that reason, advisor performance is best evaluated across multiple metrics rather than any single measure alone.
